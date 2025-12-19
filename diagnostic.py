@@ -15,10 +15,11 @@ Based on GPIO pin assignments from technical_architecture.md:
 
 import time
 import sys
+import threading
 from datetime import datetime
 
 try:
-    from gpiozero import DigitalInputDevice  # type: ignore
+    from gpiozero import DigitalInputDevice, PWMOutputDevice  # type: ignore
 except ImportError:
     print("ERROR: gpiozero library not found.")
     print("This script requires gpiozero, which is only available on Raspberry Pi.")
@@ -26,10 +27,16 @@ except ImportError:
     sys.exit(1)
 
 # GPIO Pin Assignments (from technical_architecture.md)
+GPIO_LED = 17
 GPIO_LIKE_BUTTON = 18
 GPIO_MAP_TOGGLE = 27
 GPIO_METADATA_TOGGLE = 22
 GPIO_MESSAGE_BUTTON = 23
+
+# LED fade control
+led_device = None
+fade_active = False
+fade_lock = threading.Lock()
 
 # Input configurations
 INPUTS = {
@@ -75,18 +82,86 @@ def log_initial_state(name, pin, state, input_type):
     print(f"[{format_timestamp()}] {name} (GPIO {pin:2d}) [{type_str}] -> {state_str} (initial state)")
 
 
+def fade_led_loop():
+    """Fade LED in and out continuously while fade_active is True."""
+    global fade_active, led_device
+    
+    fade_duration = 2.0  # seconds for full fade in/out cycle
+    steps = 100  # number of steps in fade
+    step_delay = fade_duration / steps
+    
+    while True:
+        with fade_lock:
+            should_fade = fade_active
+        
+        if not should_fade:
+            # Turn off LED when not fading
+            if led_device:
+                led_device.value = 0
+            time.sleep(0.1)
+            continue
+        
+        # Fade in
+        for i in range(steps + 1):
+            with fade_lock:
+                if not fade_active:
+                    break
+                if led_device:
+                    # PWM value from 0.0 to 1.0
+                    led_device.value = i / steps
+            time.sleep(step_delay)
+        
+        # Fade out
+        for i in range(steps, -1, -1):
+            with fade_lock:
+                if not fade_active:
+                    break
+                if led_device:
+                    led_device.value = i / steps
+            time.sleep(step_delay)
+
+
 def create_activated_handler(name, pin, input_type):
     """Create handler for when input becomes active (pressed/on)."""
     def handler():
+        global fade_active
         log_state_change(name, pin, True, input_type)  # True = pressed/on
+        
+        # Start LED fade when Like button is pressed
+        if name == 'Like Button':
+            with fade_lock:
+                fade_active = True
+            print(f"[{format_timestamp()}] LED fade started")
+    
     return handler
 
 
 def create_deactivated_handler(name, pin, input_type):
     """Create handler for when input becomes inactive (released/off)."""
     def handler():
+        global fade_active
         log_state_change(name, pin, False, input_type)  # False = released/off
+        
+        # Stop LED fade when Like button is released
+        if name == 'Like Button':
+            with fade_lock:
+                fade_active = False
+            print(f"[{format_timestamp()}] LED fade stopped")
+    
     return handler
+
+
+def setup_led():
+    """Initialize LED with PWM output."""
+    global led_device
+    
+    try:
+        led_device = PWMOutputDevice(GPIO_LED, initial_value=0.0, frequency=1000)
+        print(f"LED (GPIO {GPIO_LED}) initialized with PWM")
+        return True
+    except Exception as e:
+        print(f"ERROR: Failed to initialize LED on GPIO {GPIO_LED}: {e}")
+        return False
 
 
 def setup_inputs():
@@ -94,6 +169,8 @@ def setup_inputs():
     print("=" * 70)
     print("Photo Portal GPIO Diagnostic Tool")
     print("=" * 70)
+    print("\nInitializing GPIO outputs...")
+    setup_led()
     print("\nInitializing GPIO inputs...")
     print(f"All inputs configured with pull-up resistors (active LOW)\n")
     
@@ -129,8 +206,15 @@ def setup_inputs():
 
 def main():
     """Main diagnostic loop."""
+    global led_device
+    
     try:
         setup_inputs()
+        
+        # Start LED fade loop in background thread
+        fade_thread = threading.Thread(target=fade_led_loop, daemon=True)
+        fade_thread.start()
+        print("LED fade thread started\n")
         
         # Keep the script running and monitor inputs
         while True:
@@ -141,7 +225,19 @@ def main():
         print("Shutting down...")
         print("=" * 70)
         
+        # Stop LED fade
+        with fade_lock:
+            fade_active = False
+        
         # Clean up GPIO resources
+        if led_device:
+            try:
+                led_device.value = 0
+                led_device.close()
+                print(f"Closed LED (GPIO {GPIO_LED})")
+            except Exception as e:
+                print(f"Error closing LED: {e}")
+        
         for name, config in INPUTS.items():
             if config['device']:
                 try:
