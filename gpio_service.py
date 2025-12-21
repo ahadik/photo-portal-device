@@ -95,6 +95,8 @@ def broadcast_event(event: dict) -> None:
 
 async def broadcast_worker() -> None:
     """Worker coroutine that processes events from queue and broadcasts to clients."""
+    global connected_clients
+    
     while True:
         try:
             if not event_queue:
@@ -342,6 +344,8 @@ async def send_initial_states(websocket) -> None:
 
 async def handle_client(websocket) -> None:
     """Handle a WebSocket client connection."""
+    global connected_clients
+    
     async with clients_lock:
         connected_clients.add(websocket)
     logger.info(f"Client connected (total clients: {len(connected_clients)})")
