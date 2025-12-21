@@ -4,10 +4,11 @@ After=network.target
 
 [Service]
 Type=simple
-ExecStart=/usr/bin/python3 /home/pi/photoportal/gpio_service.py
+ExecStart=/home/pi/photoportal/venv/bin/python3 /home/pi/photoportal/gpio_service.py
 Restart=always
 RestartSec=10
 User=pi
+WorkingDirectory=/home/pi/photoportal
 StandardOutput=journal
 StandardError=journal
 
