@@ -38,6 +38,14 @@ if ! dpkg -l | grep -q "^ii.*python3-dev"; then
     MISSING_DEPS+=("python3-dev")
 fi
 
+# Check for lgpio C library (required for Python lgpio package)
+if ! ldconfig -p | grep -q liblgpio; then
+    # Try to find the package that provides liblgpio
+    if ! dpkg -l | grep -qE "^ii.*(lgpio|liblgpio)"; then
+        MISSING_DEPS+=("liblgpio-dev")
+    fi
+fi
+
 if [ ${#MISSING_DEPS[@]} -gt 0 ]; then
     echo "WARNING: Missing build dependencies: ${MISSING_DEPS[*]}"
     echo "These are required to build the lgpio package from source."

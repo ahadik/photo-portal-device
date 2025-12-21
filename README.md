@@ -39,14 +39,16 @@ This directory contains Python scripts for managing GPIO hardware on the Raspber
    # /home/pi/photoportal/
    ```
 
-2. **Install build dependencies (Required for lgpio):**
+2. **Install build dependencies and C library (Required for lgpio):**
 
-   The `lgpio` package needs to be compiled from source, which requires build tools:
+   The `lgpio` Python package is a wrapper around the `lgpio` C library. You need both:
 
    ```bash
    sudo apt update
-   sudo apt install -y swig build-essential python3-dev
+   sudo apt install -y swig build-essential python3-dev liblgpio-dev
    ```
+
+   **Note:** The `liblgpio-dev` package provides the C library that the Python package links against. Without it, the build will fail with "cannot find -llgpio".
 
    **Note:** The setup script will prompt you to install these if they're missing.
 
@@ -361,16 +363,16 @@ This means the GPIO libraries aren't properly configured. **This script must be 
 
 2. **Install the lgpio library:**
 
-   **If using a virtual environment (recommended):**
-
-   The `lgpio` package is included in `requirements.txt` but requires build tools to compile. First install build dependencies:
+   The `lgpio` Python package requires both build tools AND the C library. Install all dependencies:
 
    ```bash
    sudo apt update
-   sudo apt install -y swig build-essential python3-dev
+   sudo apt install -y swig build-essential python3-dev liblgpio-dev
    ```
 
-   Then install lgpio in your virtual environment:
+   **If using a virtual environment (recommended):**
+
+   After installing the system dependencies above, install the Python package:
 
    ```bash
    source venv/bin/activate
@@ -384,15 +386,15 @@ This means the GPIO libraries aren't properly configured. **This script must be 
    pip install -r requirements.txt
    ```
 
-   **Alternative: Use system package (if you prefer not to build from source):**
+   **Alternative: Use system package (if building from source fails):**
 
-   If building from source fails, you can install the system package and link it:
+   If building from source continues to fail, you can use the pre-built system package:
 
    ```bash
    sudo apt install python3-lgpio
    ```
 
-   However, this breaks virtual environment isolation. The recommended approach is to install build dependencies and build from source.
+   However, this breaks virtual environment isolation. The recommended approach is to install `liblgpio-dev` and build from source.
 
 3. **If using a virtual environment, reinstall gpiozero:**
 
