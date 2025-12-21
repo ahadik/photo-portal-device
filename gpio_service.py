@@ -71,7 +71,7 @@ adc_reader_thread: Optional[threading.Thread] = None
 adc_running = False
 adc_lock = threading.Lock()
 last_adc_value = 0.0
-connected_clients: Set[websockets.WebSocketServerProtocol] = set()
+connected_clients: Set = set()  # Set of WebSocket connections
 clients_lock: Optional[asyncio.Lock] = None  # Will be initialized in websocket_server
 event_queue: Optional[asyncio.Queue] = None  # Queue for events from threads
 websocket_loop: Optional[asyncio.AbstractEventLoop] = None  # Store reference to event loop
@@ -157,7 +157,14 @@ def setup_led() -> bool:
         logger.info(f"LED (GPIO {GPIO_LED}) initialized with PWM")
         return True
     except Exception as e:
-        logger.error(f"Failed to initialize LED on GPIO {GPIO_LED}: {e}")
+        error_msg = str(e)
+        if "busy" in error_msg.lower():
+            logger.error(f"Failed to initialize LED on GPIO {GPIO_LED}: {e}")
+            logger.error("  GPIO pin is already in use. Another process may be using it.")
+            logger.error("  Try: sudo lsof | grep gpio  or  sudo fuser /dev/gpiochip*")
+            logger.error("  Or restart the service: sudo systemctl restart photoportal-gpio.service")
+        else:
+            logger.error(f"Failed to initialize LED on GPIO {GPIO_LED}: {e}")
         return False
 
 
@@ -234,7 +241,22 @@ def setup_gpio_inputs() -> None:
                 logger.info(f"{name} (GPIO {pin}) initialized")
             
         except Exception as e:
-            logger.error(f"Failed to initialize {name} on GPIO {pin}: {e}")
+            error_msg = str(e)
+            if "busy" in error_msg.lower():
+                logger.error(f"Failed to initialize {name} on GPIO {pin}: {e}")
+                if name == 'LIKE_BUTTON':  # Only print help message once
+                    logger.error("  GPIO pins are already in use. Another process may be using them.")
+                    logger.error("  Try: sudo lsof | grep gpio  or  sudo fuser /dev/gpiochip*")
+                    logger.error("  Or restart the service: sudo systemctl restart photoportal-gpio.service")
+                    logger.error("  Or stop any other GPIO services/scripts that might be running.")
+            elif "SOC peripheral base address" in error_msg or "lgpio" in error_msg.lower():
+                logger.error(f"Failed to initialize {name} on GPIO {pin}: {e}")
+                if name == 'LIKE_BUTTON':  # Only print help message once
+                    logger.error("  This usually means you're not running on a Raspberry Pi, or GPIO libraries aren't configured.")
+                    logger.error("  This script must be run on a Raspberry Pi with proper GPIO access.")
+                    logger.error("  If you are on a Raspberry Pi, try: sudo apt install python3-lgpio")
+            else:
+                logger.error(f"Failed to initialize {name} on GPIO {pin}: {e}")
             input_devices[name] = None
 
 
@@ -300,7 +322,7 @@ def start_adc_reader() -> None:
     logger.info("ADC reader thread started")
 
 
-async def send_initial_states(websocket: websockets.WebSocketServerProtocol) -> None:
+async def send_initial_states(websocket) -> None:
     """Send initial states of all inputs to a newly connected client."""
     # Send MAP_TOGGLE initial state
     if 'MAP_TOGGLE' in switch_states:
@@ -318,7 +340,7 @@ async def send_initial_states(websocket: websockets.WebSocketServerProtocol) -> 
             logger.debug(f"Sent initial ZOOM_DIAL value: {last_adc_value:.3f}")
 
 
-async def handle_client(websocket: websockets.WebSocketServerProtocol, path: str) -> None:
+async def handle_client(websocket) -> None:
     """Handle a WebSocket client connection."""
     async with clients_lock:
         connected_clients.add(websocket)
