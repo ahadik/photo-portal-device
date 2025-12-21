@@ -1,0 +1,15 @@
+[Unit]
+Description=Photo Portal GPIO Service
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 /home/pi/photoportal/gpio_service.py
+Restart=always
+RestartSec=10
+User=pi
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
