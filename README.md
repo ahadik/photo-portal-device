@@ -39,7 +39,18 @@ This directory contains Python scripts for managing GPIO hardware on the Raspber
    # /home/pi/photoportal/
    ```
 
-2. **Run the setup script (Recommended):**
+2. **Install build dependencies (Required for lgpio):**
+
+   The `lgpio` package needs to be compiled from source, which requires build tools:
+
+   ```bash
+   sudo apt update
+   sudo apt install -y swig build-essential python3-dev
+   ```
+
+   **Note:** The setup script will prompt you to install these if they're missing.
+
+3. **Run the setup script (Recommended):**
 
    First, make the setup script executable:
 
@@ -58,6 +69,8 @@ This directory contains Python scripts for managing GPIO hardware on the Raspber
    ```bash
    bash setup.sh
    ```
+
+   The setup script will check for build dependencies and offer to install them automatically.
 
    If you prefer to set up manually:
 
@@ -89,7 +102,7 @@ This directory contains Python scripts for managing GPIO hardware on the Raspber
 
    If using this method, you'll need to update the systemd service file to use system Python and set PYTHONPATH (see Troubleshooting section).
 
-3. **Enable I2C (for ADC support):**
+4. **Enable I2C (for ADC support):**
 
    ```bash
    sudo raspi-config
@@ -97,7 +110,7 @@ This directory contains Python scripts for managing GPIO hardware on the Raspber
    # Reboot after enabling
    ```
 
-4. **Make scripts executable:**
+5. **Make scripts executable:**
 
    ```bash
    chmod +x setup.sh diagnostic.py gpio_service.py
@@ -350,21 +363,36 @@ This means the GPIO libraries aren't properly configured. **This script must be 
 
    **If using a virtual environment (recommended):**
 
-   The `lgpio` package is included in `requirements.txt` and will be installed automatically when you run `pip install -r requirements.txt`. If you've already set up the venv, just reinstall:
+   The `lgpio` package is included in `requirements.txt` but requires build tools to compile. First install build dependencies:
+
+   ```bash
+   sudo apt update
+   sudo apt install -y swig build-essential python3-dev
+   ```
+
+   Then install lgpio in your virtual environment:
 
    ```bash
    source venv/bin/activate
    pip install lgpio
    ```
 
-   **If NOT using a virtual environment:**
-
-   Install as a system package:
+   Or reinstall all requirements:
 
    ```bash
-   sudo apt update
+   source venv/bin/activate
+   pip install -r requirements.txt
+   ```
+
+   **Alternative: Use system package (if you prefer not to build from source):**
+
+   If building from source fails, you can install the system package and link it:
+
+   ```bash
    sudo apt install python3-lgpio
    ```
+
+   However, this breaks virtual environment isolation. The recommended approach is to install build dependencies and build from source.
 
 3. **If using a virtual environment, reinstall gpiozero:**
 

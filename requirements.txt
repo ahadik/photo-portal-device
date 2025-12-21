@@ -1,4 +1,7 @@
 gpiozero>=1.6.2
+# Note: lgpio requires build tools (swig, build-essential, python3-dev)
+# Install via: sudo apt install swig build-essential python3-dev
+# Or install system package: sudo apt install python3-lgpio
 lgpio>=0.2.0.0
 websockets>=12.0
 adafruit-circuitpython-ads1x15>=2.2.0

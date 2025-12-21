@@ -21,6 +21,44 @@ fi
 PYTHON_VERSION=$(python3 --version | cut -d' ' -f2 | cut -d'.' -f1,2)
 echo "Python version: $(python3 --version)"
 
+# Check for build dependencies needed for lgpio
+echo ""
+echo "Checking for build dependencies..."
+MISSING_DEPS=()
+
+if ! command -v swig &> /dev/null; then
+    MISSING_DEPS+=("swig")
+fi
+
+if ! dpkg -l | grep -q "^ii.*build-essential"; then
+    MISSING_DEPS+=("build-essential")
+fi
+
+if ! dpkg -l | grep -q "^ii.*python3-dev"; then
+    MISSING_DEPS+=("python3-dev")
+fi
+
+if [ ${#MISSING_DEPS[@]} -gt 0 ]; then
+    echo "WARNING: Missing build dependencies: ${MISSING_DEPS[*]}"
+    echo "These are required to build the lgpio package from source."
+    echo ""
+    echo "To install them, run:"
+    echo "  sudo apt update"
+    echo "  sudo apt install -y ${MISSING_DEPS[*]}"
+    echo ""
+    read -p "Do you want to install them now? (requires sudo) [y/N]: " -n 1 -r
+    echo
+    if [[ $REPLY =~ ^[Yy]$ ]]; then
+        sudo apt update
+        sudo apt install -y "${MISSING_DEPS[@]}"
+        echo "Build dependencies installed."
+    else
+        echo "Skipping build dependency installation."
+        echo "You may encounter errors when installing lgpio."
+    fi
+    echo ""
+fi
+
 # Create virtual environment if it doesn't exist
 if [ ! -d "venv" ]; then
     echo ""
