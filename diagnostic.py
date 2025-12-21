@@ -33,8 +33,7 @@ except ImportError:
 try:
     import board  # type: ignore
     import busio  # type: ignore
-    import adafruit_ads1x15.ads1115 as ADS  # type: ignore
-    from adafruit_ads1x15.analog_in import AnalogIn  # type: ignore
+    from adafruit_ads1x15 import ADS1115, AnalogIn, ads1x15  # type: ignore
     ADC_AVAILABLE = True
 except ImportError:
     ADC_AVAILABLE = False
@@ -214,8 +213,8 @@ def adc_reader_loop():
     try:
         # Initialize I2C and ADS1115
         i2c = busio.I2C(board.SCL, board.SDA)
-        ads = ADS.ADS1115(i2c, address=ADC_I2C_ADDRESS)
-        chan = AnalogIn(ads, ADS.P0)  # Channel A0
+        ads = ADS1115(i2c, address=ADC_I2C_ADDRESS)
+        chan = AnalogIn(ads, ads1x15.Pin.A0)  # Channel A0
         
         print(f"[{format_timestamp()}] ADC (ADS1115) initialized on I2C address 0x{ADC_I2C_ADDRESS:02X}")
         

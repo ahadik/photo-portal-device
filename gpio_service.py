@@ -27,8 +27,7 @@ except ImportError:
 try:
     import board  # type: ignore
     import busio  # type: ignore
-    import adafruit_ads1x15.ads1115 as ADS  # type: ignore
-    from adafruit_ads1x15.analog_in import AnalogIn  # type: ignore
+    from adafruit_ads1x15 import ADS1115, AnalogIn, ads1x15  # type: ignore
     ADC_AVAILABLE = True
 except ImportError:
     ADC_AVAILABLE = False
@@ -54,7 +53,7 @@ WS_PORT = 8765
 
 # ADC configuration
 ADC_I2C_ADDRESS = 0x48  # Default ADS1115 address
-ADC_CHANNEL = ADS.P0  # Channel A0
+ADC_CHANNEL = ads1x15.Pin.A0  # Channel A0
 ADC_POLL_RATE = 10  # Hz (10Hz = 100ms interval)
 ADC_CHANGE_THRESHOLD = 0.02  # 2% of full range
 
@@ -249,7 +248,7 @@ def adc_reader_loop() -> None:
     try:
         # Initialize I2C and ADS1115
         i2c = busio.I2C(board.SCL, board.SDA)
-        ads = ADS.ADS1115(i2c, address=ADC_I2C_ADDRESS)
+        ads = ADS1115(i2c, address=ADC_I2C_ADDRESS)
         chan = AnalogIn(ads, ADC_CHANNEL)
         
         logger.info("ADC (ADS1115) initialized")

@@ -361,40 +361,23 @@ This means the GPIO libraries aren't properly configured. **This script must be 
 
    Should show "Raspberry Pi" model information.
 
-2. **Install the lgpio library:**
+2. **Install GPIO system packages (Recommended):**
 
-   The `lgpio` Python package requires both build tools AND the C library. Install all dependencies:
+   `gpiozero` automatically selects the best available pin factory. For best performance, install the system package:
 
    ```bash
    sudo apt update
-   sudo apt install -y swig build-essential python3-dev liblgpio-dev
+   sudo apt install -y python3-lgpio
    ```
 
-   **If using a virtual environment (recommended):**
+   **Why this is simpler:**
 
-   After installing the system dependencies above, install the Python package:
+   - No compilation needed (pre-built package)
+   - Works with virtual environments (gpiozero can use system packages)
+   - Better performance than pure Python implementation
+   - No build tools required
 
-   ```bash
-   source venv/bin/activate
-   pip install lgpio
-   ```
-
-   Or reinstall all requirements:
-
-   ```bash
-   source venv/bin/activate
-   pip install -r requirements.txt
-   ```
-
-   **Alternative: Use system package (if building from source fails):**
-
-   If building from source continues to fail, you can use the pre-built system package:
-
-   ```bash
-   sudo apt install python3-lgpio
-   ```
-
-   However, this breaks virtual environment isolation. The recommended approach is to install `liblgpio-dev` and build from source.
+   **Note:** `gpiozero` will automatically use `python3-lgpio` if available, or fall back to other options (RPi.GPIO, pigpio, or native Python) if not. You don't need to install anything in the virtual environment for GPIO functionality.
 
 3. **If using a virtual environment, reinstall gpiozero:**
 

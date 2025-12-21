@@ -21,51 +21,24 @@ fi
 PYTHON_VERSION=$(python3 --version | cut -d' ' -f2 | cut -d'.' -f1,2)
 echo "Python version: $(python3 --version)"
 
-# Check for build dependencies needed for lgpio
+# Check for GPIO system packages (gpiozero will use these automatically)
 echo ""
-echo "Checking for build dependencies..."
-MISSING_DEPS=()
+echo "Checking for GPIO system packages..."
+MISSING_GPIO=()
 
-if ! command -v swig &> /dev/null; then
-    MISSING_DEPS+=("swig")
+# Check for python3-gpiozero (optional, but helpful)
+if ! dpkg -l | grep -q "^ii.*python3-gpiozero"; then
+    # Not critical - we install via pip
+    echo "Note: python3-gpiozero not installed (will use pip version)"
 fi
 
-if ! dpkg -l | grep -q "^ii.*build-essential"; then
-    MISSING_DEPS+=("build-essential")
+# Check for python3-lgpio or python3-rpi.gpio (gpiozero will use these if available)
+if ! dpkg -l | grep -qE "^ii.*python3-(lgpio|rpi\.gpio)"; then
+    echo "Note: No GPIO pin factory system packages found."
+    echo "      gpiozero will use its native Python implementation."
+    echo "      For better performance, you can install: sudo apt install python3-lgpio"
 fi
-
-if ! dpkg -l | grep -q "^ii.*python3-dev"; then
-    MISSING_DEPS+=("python3-dev")
-fi
-
-# Check for lgpio C library (required for Python lgpio package)
-if ! ldconfig -p | grep -q liblgpio; then
-    # Try to find the package that provides liblgpio
-    if ! dpkg -l | grep -qE "^ii.*(lgpio|liblgpio)"; then
-        MISSING_DEPS+=("liblgpio-dev")
-    fi
-fi
-
-if [ ${#MISSING_DEPS[@]} -gt 0 ]; then
-    echo "WARNING: Missing build dependencies: ${MISSING_DEPS[*]}"
-    echo "These are required to build the lgpio package from source."
-    echo ""
-    echo "To install them, run:"
-    echo "  sudo apt update"
-    echo "  sudo apt install -y ${MISSING_DEPS[*]}"
-    echo ""
-    read -p "Do you want to install them now? (requires sudo) [y/N]: " -n 1 -r
-    echo
-    if [[ $REPLY =~ ^[Yy]$ ]]; then
-        sudo apt update
-        sudo apt install -y "${MISSING_DEPS[@]}"
-        echo "Build dependencies installed."
-    else
-        echo "Skipping build dependency installation."
-        echo "You may encounter errors when installing lgpio."
-    fi
-    echo ""
-fi
+echo ""
 
 # Create virtual environment if it doesn't exist
 if [ ! -d "venv" ]; then
