@@ -326,6 +326,72 @@ pip3 install --user -r requirements.txt
 
 Note: If using `--user`, you'll need to update the systemd service file to use system Python and set PYTHONPATH (see systemd service setup section).
 
+### "Cannot determine SOC peripheral base address" Error
+
+If you see errors like:
+```
+ERROR: Failed to initialize LED on GPIO 17: Cannot determine SOC peripheral base address
+PinFactoryFallback: Falling back from lgpio: No module named 'lgpio'
+```
+
+This means the GPIO libraries aren't properly configured. **This script must be run on a Raspberry Pi.**
+
+**Solutions:**
+
+1. **Verify you're on a Raspberry Pi:**
+
+   ```bash
+   cat /proc/cpuinfo | grep Model
+   ```
+
+   Should show "Raspberry Pi" model information.
+
+2. **Install the lgpio library:**
+
+   **If using a virtual environment (recommended):**
+
+   The `lgpio` package is included in `requirements.txt` and will be installed automatically when you run `pip install -r requirements.txt`. If you've already set up the venv, just reinstall:
+
+   ```bash
+   source venv/bin/activate
+   pip install lgpio
+   ```
+
+   **If NOT using a virtual environment:**
+
+   Install as a system package:
+
+   ```bash
+   sudo apt update
+   sudo apt install python3-lgpio
+   ```
+
+3. **If using a virtual environment, reinstall gpiozero:**
+
+   ```bash
+   source venv/bin/activate
+   pip install --upgrade --force-reinstall gpiozero
+   ```
+
+4. **Verify GPIO access:**
+
+   ```bash
+   # Check if gpio group exists
+   groups
+   
+   # Add user to gpio group if needed
+   sudo usermod -a -G gpio $USER
+   # Log out and back in for changes to take effect
+   ```
+
+5. **If running on a non-Raspberry Pi system:**
+
+   This script requires actual Raspberry Pi hardware. It cannot run on:
+   - macOS
+   - Windows
+   - Linux systems without Raspberry Pi hardware
+   - Virtual machines (unless specifically configured for GPIO passthrough)
+
 ### GPIO Permission Errors
 
 If you see permission errors accessing GPIO:

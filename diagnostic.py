@@ -21,6 +21,9 @@ from datetime import datetime
 
 try:
     from gpiozero import DigitalInputDevice, PWMOutputDevice  # type: ignore
+    import warnings
+    # Suppress PinFactoryFallback warnings - we'll handle errors explicitly
+    warnings.filterwarnings('ignore', category=UserWarning, module='gpiozero')
 except ImportError:
     print("ERROR: gpiozero library not found.")
     print("This script requires gpiozero, which is only available on Raspberry Pi.")
@@ -190,7 +193,14 @@ def setup_led():
         print(f"LED (GPIO {GPIO_LED}) initialized with PWM")
         return True
     except Exception as e:
-        print(f"ERROR: Failed to initialize LED on GPIO {GPIO_LED}: {e}")
+        error_msg = str(e)
+        if "SOC peripheral base address" in error_msg or "lgpio" in error_msg.lower():
+            print(f"ERROR: Failed to initialize LED on GPIO {GPIO_LED}: {e}")
+            print("  This usually means you're not running on a Raspberry Pi, or GPIO libraries aren't configured.")
+            print("  This script must be run on a Raspberry Pi with proper GPIO access.")
+            print("  If you are on a Raspberry Pi, try: sudo apt install python3-lgpio")
+        else:
+            print(f"ERROR: Failed to initialize LED on GPIO {GPIO_LED}: {e}")
         return False
 
 
@@ -296,7 +306,15 @@ def setup_inputs():
             log_initial_state(name, pin, initial_state, input_type)
             
         except Exception as e:
-            print(f"ERROR: Failed to initialize {name} on GPIO {pin}: {e}")
+            error_msg = str(e)
+            if "SOC peripheral base address" in error_msg or "lgpio" in error_msg.lower():
+                print(f"ERROR: Failed to initialize {name} on GPIO {pin}: {e}")
+                print(f"  This usually means you're not running on a Raspberry Pi, or GPIO libraries aren't configured.")
+                if name == 'Like Button':  # Only print help message once
+                    print("  This script must be run on a Raspberry Pi with proper GPIO access.")
+                    print("  If you are on a Raspberry Pi, try: sudo apt install python3-lgpio")
+            else:
+                print(f"ERROR: Failed to initialize {name} on GPIO {pin}: {e}")
             config['device'] = None
     
     print("\n" + "=" * 70)
