@@ -11,6 +11,7 @@ Based on GPIO pin assignments from technical_architecture.md:
 - GPIO 27: Map view toggle (SPDT, pull-up)
 - GPIO 22: Metadata overlay toggle (SPDT, pull-up)
 - GPIO 23: Message view button (momentary, pull-up)
+- ADS1115 (I2C): Potentiometer (zoom control)
 """
 
 import time
@@ -26,6 +27,16 @@ except ImportError:
     print("Install it with: pip3 install gpiozero")
     sys.exit(1)
 
+try:
+    import board  # type: ignore
+    import busio  # type: ignore
+    import adafruit_ads1x15.ads1115 as ADS  # type: ignore
+    from adafruit_ads1x15.analog_in import AnalogIn  # type: ignore
+    ADC_AVAILABLE = True
+except ImportError:
+    ADC_AVAILABLE = False
+    print("WARNING: adafruit-circuitpython-ads1x15 not available. ADC functionality disabled.")
+
 # GPIO Pin Assignments (from technical_architecture.md)
 GPIO_LED = 17
 GPIO_LIKE_BUTTON = 18
@@ -37,6 +48,17 @@ GPIO_MESSAGE_BUTTON = 23
 led_device = None
 fade_active = False
 fade_lock = threading.Lock()
+
+# ADC configuration
+ADC_I2C_ADDRESS = 0x48  # Default ADS1115 address
+ADC_POLL_RATE = 10  # Hz (10Hz = 100ms interval)
+ADC_CHANGE_THRESHOLD = 0.02  # 2% of full range
+
+# ADC state
+adc_reader_thread = None
+adc_running = False
+adc_lock = threading.Lock()
+last_adc_value = 0.0
 
 # Input configurations
 INPUTS = {
@@ -80,6 +102,14 @@ def log_initial_state(name, pin, state, input_type):
     state_str = "PRESSED/ON" if state else "RELEASED/OFF"
     type_str = "button" if input_type == 'momentary' else "switch"
     print(f"[{format_timestamp()}] {name} (GPIO {pin:2d}) [{type_str}] -> {state_str} (initial state)")
+
+
+def log_adc_change(value, raw_value=None):
+    """Log ADC value change."""
+    if raw_value is not None:
+        print(f"[{format_timestamp()}] ADC (Potentiometer) -> {value:.3f} (raw: {raw_value})")
+    else:
+        print(f"[{format_timestamp()}] ADC (Potentiometer) -> {value:.3f}")
 
 
 def fade_led_loop():
@@ -164,6 +194,71 @@ def setup_led():
         return False
 
 
+def adc_reader_loop():
+    """Read ADC potentiometer value continuously and log changes."""
+    global last_adc_value, adc_running
+    
+    if not ADC_AVAILABLE:
+        return
+    
+    try:
+        # Initialize I2C and ADS1115
+        i2c = busio.I2C(board.SCL, board.SDA)
+        ads = ADS.ADS1115(i2c, address=ADC_I2C_ADDRESS)
+        chan = AnalogIn(ads, ADS.P0)  # Channel A0
+        
+        print(f"[{format_timestamp()}] ADC (ADS1115) initialized on I2C address 0x{ADC_I2C_ADDRESS:02X}")
+        
+        # Read and log initial value
+        raw_value = chan.value
+        normalized_value = raw_value / 32767.0
+        with adc_lock:
+            last_adc_value = normalized_value
+        print(f"[{format_timestamp()}] ADC (Potentiometer) -> {normalized_value:.3f} (raw: {raw_value}) (initial value)")
+        
+        poll_interval = 1.0 / ADC_POLL_RATE  # 100ms for 10Hz
+        
+        adc_running = True
+        while adc_running:
+            try:
+                # Read raw ADC value (0-32767 for 16-bit)
+                raw_value = chan.value
+                
+                # Normalize to 0.0-1.0
+                normalized_value = raw_value / 32767.0
+                
+                # Check if change exceeds threshold
+                with adc_lock:
+                    change = abs(normalized_value - last_adc_value)
+                    
+                    if change >= ADC_CHANGE_THRESHOLD:
+                        last_adc_value = normalized_value
+                        log_adc_change(normalized_value, raw_value)
+                
+                time.sleep(poll_interval)
+                
+            except Exception as e:
+                print(f"[{format_timestamp()}] ERROR: Error reading ADC: {e}")
+                time.sleep(poll_interval)
+                
+    except Exception as e:
+        print(f"[{format_timestamp()}] ERROR: Failed to initialize ADC: {e}")
+        adc_running = False
+
+
+def start_adc_reader():
+    """Start ADC reader in background thread."""
+    global adc_reader_thread
+    
+    if not ADC_AVAILABLE:
+        print("WARNING: ADC not available, skipping ADC reader thread")
+        return
+    
+    adc_reader_thread = threading.Thread(target=adc_reader_loop, daemon=True)
+    adc_reader_thread.start()
+    print("ADC reader thread started")
+
+
 def setup_inputs():
     """Initialize all GPIO inputs with pull-up resistors."""
     print("=" * 70)
@@ -173,6 +268,11 @@ def setup_inputs():
     setup_led()
     print("\nInitializing GPIO inputs...")
     print(f"All inputs configured with pull-up resistors (active LOW)\n")
+    
+    if ADC_AVAILABLE:
+        print("Initializing ADC (ADS1115)...")
+        print(f"ADC configured: I2C address 0x{ADC_I2C_ADDRESS:02X}, Channel A0")
+        print(f"Poll rate: {ADC_POLL_RATE}Hz, Change threshold: {ADC_CHANGE_THRESHOLD*100:.1f}%\n")
     
     for name, config in INPUTS.items():
         pin = config['pin']
@@ -200,7 +300,7 @@ def setup_inputs():
             config['device'] = None
     
     print("\n" + "=" * 70)
-    print("Monitoring GPIO inputs... (Press Ctrl+C to exit)")
+    print("Monitoring GPIO inputs and ADC... (Press Ctrl+C to exit)")
     print("=" * 70 + "\n")
 
 
@@ -214,7 +314,11 @@ def main():
         # Start LED fade loop in background thread
         fade_thread = threading.Thread(target=fade_led_loop, daemon=True)
         fade_thread.start()
-        print("LED fade thread started\n")
+        print("LED fade thread started")
+        
+        # Start ADC reader thread
+        start_adc_reader()
+        print()
         
         # Keep the script running and monitor inputs
         while True:
@@ -228,6 +332,13 @@ def main():
         # Stop LED fade
         with fade_lock:
             fade_active = False
+        
+        # Stop ADC reader
+        global adc_running
+        adc_running = False
+        if adc_reader_thread and adc_reader_thread.is_alive():
+            adc_reader_thread.join(timeout=2.0)
+            print("ADC reader thread stopped")
         
         # Clean up GPIO resources
         if led_device:
