@@ -53,9 +53,9 @@ WS_PORT = 8765
 
 # ADC configuration
 ADC_I2C_ADDRESS = 0x48  # Default ADS1115 address
-ADC_CHANNEL = ads1x15.Pin.A0  # Channel A0
 ADC_POLL_RATE = 10  # Hz (10Hz = 100ms interval)
 ADC_CHANGE_THRESHOLD = 0.02  # 2% of full range
+# Note: ADC_CHANNEL will be set after imports are available
 
 # Configure logging
 logging.basicConfig(
@@ -80,7 +80,12 @@ switch_states: Dict[str, str] = {}  # Track switch states for MAP_TOGGLE and MET
 
 def broadcast_event(event: dict) -> None:
     """Broadcast a GPIO event to all connected WebSocket clients (called from thread context)."""
-    if not connected_clients or not event_queue:
+    if not event_queue:
+        logger.debug("Event queue not initialized, skipping broadcast")
+        return
+    
+    if not connected_clients:
+        logger.debug("No connected clients, skipping broadcast")
         return
     
     message = json.dumps(event)
@@ -89,8 +94,11 @@ def broadcast_event(event: dict) -> None:
     try:
         if websocket_loop and websocket_loop.is_running():
             asyncio.run_coroutine_threadsafe(event_queue.put(message), websocket_loop)
+            logger.debug(f"Queued event: {event.get('type')}")
+        else:
+            logger.warning("WebSocket loop not running, cannot queue event")
     except Exception as e:
-        logger.warning(f"Error queuing event: {e}")
+        logger.warning(f"Error queuing event: {e}", exc_info=True)
 
 
 async def broadcast_worker() -> None:
@@ -267,15 +275,23 @@ def adc_reader_loop() -> None:
     global last_adc_value, adc_running
     
     if not ADC_AVAILABLE:
+        logger.warning("ADC not available, ADC reader thread exiting")
         return
     
     try:
         # Initialize I2C and ADS1115
         i2c = busio.I2C(board.SCL, board.SDA)
         ads = ADS1115(i2c, address=ADC_I2C_ADDRESS)
-        chan = AnalogIn(ads, ADC_CHANNEL)
+        chan = AnalogIn(ads, ads1x15.Pin.A0)  # Channel A0
         
         logger.info("ADC (ADS1115) initialized")
+        
+        # Read and set initial value
+        initial_raw = chan.value
+        initial_normalized = initial_raw / 32767.0
+        with adc_lock:
+            last_adc_value = initial_normalized
+        logger.info(f"ADC initial value: {initial_normalized:.3f} (raw: {initial_raw})")
         
         poll_interval = 1.0 / ADC_POLL_RATE  # 100ms for 10Hz
         
@@ -295,19 +311,19 @@ def adc_reader_loop() -> None:
                     if change >= ADC_CHANGE_THRESHOLD:
                         last_adc_value = normalized_value
                         
-                        # Broadcast ZOOM_DIAL event (note: event type is ZOOM_DIAL, not ZOOM_CHANGE)
+                        # Broadcast ZOOM_DIAL event
                         event = {"type": "ZOOM_DIAL", "value": normalized_value}
-                        logger.debug(f"ADC reading: {normalized_value:.3f}")
+                        logger.info(f"ADC change detected: {normalized_value:.3f} (change: {change:.3f}, raw: {raw_value})")
                         broadcast_event(event)
                 
                 time.sleep(poll_interval)
                 
             except Exception as e:
-                logger.error(f"Error reading ADC: {e}")
+                logger.error(f"Error reading ADC: {e}", exc_info=True)
                 time.sleep(poll_interval)
                 
     except Exception as e:
-        logger.error(f"Failed to initialize ADC: {e}")
+        logger.error(f"Failed to initialize ADC: {e}", exc_info=True)
         adc_running = False
 
 
