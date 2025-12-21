@@ -41,13 +41,19 @@ This directory contains Python scripts for managing GPIO hardware on the Raspber
 
 2. **Run the setup script (Recommended):**
 
-   The setup script will create a virtual environment and install all dependencies:
+   First, make the setup script executable:
+
+   ```bash
+   chmod +x setup.sh
+   ```
+
+   Then run the setup script (it will create a virtual environment and install all dependencies):
 
    ```bash
    ./setup.sh
    ```
 
-   Or manually:
+   Or run it with bash directly (no chmod needed):
 
    ```bash
    bash setup.sh
@@ -94,8 +100,10 @@ This directory contains Python scripts for managing GPIO hardware on the Raspber
 4. **Make scripts executable:**
 
    ```bash
-   chmod +x diagnostic.py gpio_service.py
+   chmod +x setup.sh diagnostic.py gpio_service.py
    ```
+
+   **Note:** If you get "permission denied" when running `./setup.sh`, make sure you've run `chmod +x setup.sh` first, or use `bash setup.sh` instead.
 
 ## Usage
 

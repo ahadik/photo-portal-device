@@ -9,7 +9,7 @@ cd "$SCRIPT_DIR"
 
 echo "Photo Portal GPIO Service Setup"
 echo "================================"
-echo ""
+echo " "
 
 # Check if Python 3 is available
 if ! command -v python3 &> /dev/null; then
