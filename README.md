@@ -6,25 +6,28 @@ This directory contains Python scripts for managing GPIO hardware on the Raspber
 
 - **`diagnostic.py`** - Diagnostic tool to test and verify GPIO inputs, ADC, and LED output
 - **`gpio_service.py`** - WebSocket service that bridges hardware with the webapp
-- **`photoportal-gpio.service`** - systemd unit file for running the GPIO service as a background service
 - **`requirements.txt`** - Python package dependencies
-- **`setup.sh`** - Automated setup script to create virtual environment and install dependencies
+- **`setup.sh`** - Automated setup script to create virtual environment, install dependencies, and optionally configure systemd service (generates systemd service file automatically)
 - **`.gitignore`** - Git ignore file to exclude virtual environment and Python artifacts
 
 ## Prerequisites
 
 - Raspberry Pi 4 or 5 running Raspberry Pi OS (64-bit)
 - Python 3.7 or higher
-- Physical hardware connected according to the [technical architecture](../photo-portal-web/docs/technical_architecture.md)
+- Physical hardware connected according to the [hardware wiring guide](docs/hardware-wiring.md)
 
 ### Hardware Requirements
 
-- LED on GPIO 17 (with 330Ω resistor)
-- Like button on GPIO 18 (momentary, pull-up)
+- LED push button (acts as LED indicator, Select button, and Message button)
+  - LED contacts wired to GPIO 17 (built-in 200Ω resistor, no external resistor needed)
+  - Button switch contacts wired to GPIO 18 (momentary, pull-up)
+  - Functionality: In Slideshow Mode, shows the most recent message; in Map View, sets the boundary filter
+  - Recommended: [Adafruit Arcade Button with LED - 30mm](https://www.adafruit.com/product/3491)
+  - Alternative: Separate LED with 330Ω external resistor and separate button if not using LED push button
 - Map toggle switch on GPIO 27 (SPDT, pull-up)
 - Metadata toggle switch on GPIO 22 (SPDT, pull-up)
-- Message button on GPIO 23 (momentary, pull-up)
-- ADS1115 ADC on I2C (GPIO 2/3) for potentiometer (optional)
+- ADS1115 ADC on I2C (GPIO 2/3) for potentiometer
+- Potentiometer - 10kΩ linear potentiometer (for zoom control)
 
 ## Installation
 
@@ -33,10 +36,10 @@ This directory contains Python scripts for managing GPIO hardware on the Raspber
    ```bash
    # If using git
    git clone <repository-url>
-   cd photo-portal/photo-portal-device
+   cd photo-portal-device
    
    # Or copy files directly to:
-   # /home/pi/photoportal/
+   # /home/pi/photo-portal-device/
    ```
 
 2. **Install build dependencies and C library (Required for lgpio):**
@@ -54,25 +57,26 @@ This directory contains Python scripts for managing GPIO hardware on the Raspber
 
 3. **Run the setup script (Recommended):**
 
-   First, make the setup script executable:
-
-   ```bash
-   chmod +x setup.sh
-   ```
-
-   Then run the setup script (it will create a virtual environment and install all dependencies):
+   The scripts are already executable in the repository, so you can run them directly:
 
    ```bash
    ./setup.sh
    ```
 
-   Or run it with bash directly (no chmod needed):
+   Or run it with bash directly:
 
    ```bash
    bash setup.sh
    ```
 
-   The setup script will check for build dependencies and offer to install them automatically.
+   **Note:** If you get "permission denied" when running `./setup.sh`, the executable permissions may not have been preserved. In that case, run `chmod +x setup.sh` or use `bash setup.sh` instead.
+
+   The setup script will:
+   - Ask you to choose Python installation method (venv or custom) at the beginning
+   - Check for build dependencies and offer to install them automatically
+   - Create a virtual environment (if chosen) and install Python dependencies using the selected Python
+   - Verify installation by testing imports
+   - Optionally set up the systemd service for auto-start on boot (only after successful installation)
 
    If you prefer to set up manually:
 
@@ -112,13 +116,225 @@ This directory contains Python scripts for managing GPIO hardware on the Raspber
    # Reboot after enabling
    ```
 
-5. **Make scripts executable:**
+5. **Set up systemd service for auto-start on boot (Optional but Recommended):**
+
+   The GPIO service can be configured as a systemd service that automatically starts when your Raspberry Pi boots up. This ensures the service is always running, even after reboots or power cycles.
+
+   **Automated Setup (Recommended):**
+
+   If you used the `setup.sh` script, it will prompt you to set up the systemd service after successfully installing dependencies. The script will:
+
+   - Prompt whether to set up systemd service (default: yes)
+   - Generate a service file using the Python path determined at the beginning
+   - Detect the current user automatically
+   - Copy the service file to `/etc/systemd/system/`
+   - Reload systemd daemon
+   - Optionally enable and start the service
+
+   **Example interaction during setup.sh:**
 
    ```bash
-   chmod +x setup.sh diagnostic.py gpio_service.py
+   $ ./setup.sh
+   ...
+   ================================
+   Dependencies installed successfully!
+
+   Would you like to set up the systemd service for auto-start on boot? (y/n) [y]: y
+
+   Setting up systemd service...
+   Using Python: /home/pi/photo-portal-device/venv/bin/python3
+
+   Generating systemd service file...
+     Python: /home/pi/photo-portal-device/venv/bin/python3
+     Working Directory: /home/pi/photo-portal-device
+     User: pi
+
+   Copying service file to /etc/systemd/system/...
+   Service file installed.
+
+   Reloading systemd daemon...
+   Systemd daemon reloaded.
+
+   Enable service to start on boot? (y/n) [y]: y
+   Enabling service...
+   Service enabled for auto-start on boot.
+
+   Start the service now? (y/n) [y]: y
+   Starting service...
+   Service started successfully!
    ```
 
-   **Note:** If you get "permission denied" when running `./setup.sh`, make sure you've run `chmod +x setup.sh` first, or use `bash setup.sh` instead.
+   **Note:** The systemd service setup only occurs after all dependencies are successfully installed and verified. This ensures the service will work correctly when started.
+
+   **Manual Setup (Alternative):**
+
+   If you prefer to set up the systemd service manually, or need to modify an existing setup:
+
+   1. **Navigate to the device scripts directory:**
+
+      ```bash
+      cd /home/pi/photo-portal-device
+      ```
+
+   2. **Create or edit the systemd service file:**
+
+      ```bash
+      sudo nano /etc/systemd/system/photoportal-gpio.service
+      ```
+
+      **Example configuration using virtual environment (default):**
+
+      ```
+      [Unit]
+      Description=Photo Portal GPIO Service
+      After=network.target
+
+      [Service]
+      Type=simple
+      ExecStart=/home/pi/photo-portal-device/venv/bin/python3 /home/pi/photo-portal-device/gpio_service.py
+      Restart=always
+      RestartSec=10
+      User=pi
+      WorkingDirectory=/home/pi/photo-portal-device
+      StandardOutput=journal
+      StandardError=journal
+
+      [Install]
+      WantedBy=multi-user.target
+      ```
+
+      **If your installation is in a different location**, update the paths accordingly.
+
+      **If you're NOT using a virtual environment** (e.g., installed with `--user` flag), use:
+      ```
+      ExecStart=/usr/bin/python3 /home/pi/photo-portal-device/gpio_service.py
+      Environment="PYTHONPATH=/home/pi/.local/lib/python3.11/site-packages"
+      WorkingDirectory=/home/pi/photo-portal-device
+      User=pi
+      ```
+
+      Save and exit the editor (in nano: `Ctrl+X`, then `Y`, then `Enter`).
+
+   3. **Reload systemd and enable the service:**
+
+      ```bash
+      sudo systemctl daemon-reload
+      sudo systemctl enable photoportal-gpio.service
+      sudo systemctl start photoportal-gpio.service
+      ```
+
+   4. **Verify the service is running:**
+
+      ```bash
+      sudo systemctl status photoportal-gpio.service
+      ```
+
+   **Service Management Commands:**
+
+   Once the service is set up, you can manage it with these commands:
+
+   ```bash
+   # Start the service
+   sudo systemctl start photoportal-gpio.service
+
+   # Stop the service
+   sudo systemctl stop photoportal-gpio.service
+
+   # Restart the service (useful after making code changes)
+   sudo systemctl restart photoportal-gpio.service
+
+   # Check if service is currently running
+   sudo systemctl is-active photoportal-gpio.service
+
+   # Check if service is enabled to start on boot
+   sudo systemctl is-enabled photoportal-gpio.service
+
+   # View recent service logs
+   sudo journalctl -u photoportal-gpio.service -n 100
+
+   # Follow service logs in real-time
+   sudo journalctl -u photoportal-gpio.service -f
+   ```
+
+6. **Set up Chromium kiosk mode for auto-launch on boot (Optional but Recommended):**
+
+   The Photo Portal device is designed to run as a kiosk, automatically launching Chromium in full-screen mode when the Raspberry Pi boots up.
+
+   **Automated Setup (Recommended):**
+
+   If you used the `setup.sh` script, it will prompt you to set up Chromium kiosk mode after configuring the systemd service. The script will:
+
+   - Prompt whether to set up kiosk mode (default: yes)
+   - Check if Chromium is installed and offer to install it if missing
+   - Create an autostart file that launches Chromium in kiosk mode
+   - Configure Chromium to navigate to `https://photoportal.alexhadik.com/device`
+   - Set up full-screen kiosk mode with appropriate flags
+
+   **Example interaction during setup.sh:**
+
+   ```bash
+   Would you like to set up Chromium to launch in kiosk mode on boot? (y/n) [y]: y
+
+   Setting up Chromium kiosk mode...
+   Creating autostart directory: /home/pi/.config/autostart
+   Creating kiosk autostart file: /home/pi/.config/autostart/photoportal-kiosk.desktop
+   Chromium kiosk mode configured!
+
+   Chromium will automatically launch in kiosk mode on boot.
+   ```
+
+   **Manual Setup (Alternative):**
+
+   If you prefer to set up kiosk mode manually:
+
+   1. **Create the autostart directory (if it doesn't exist):**
+
+      ```bash
+      mkdir -p ~/.config/autostart
+      ```
+
+   2. **Create the kiosk autostart file:**
+
+      ```bash
+      nano ~/.config/autostart/photoportal-kiosk.desktop
+      ```
+
+   3. **Add the following content:**
+
+      ```
+      [Desktop Entry]
+      Type=Application
+      Name=Photo Portal Kiosk
+      Exec=/usr/bin/chromium-browser --kiosk --noerrdialogs --disable-infobars --autoplay-policy=no-user-gesture-required https://photoportal.alexhadik.com/device
+      X-GNOME-Autostart-enabled=true
+      ```
+
+   4. **Make the file executable:**
+
+      ```bash
+      chmod +x ~/.config/autostart/photoportal-kiosk.desktop
+      ```
+
+   5. **Test kiosk mode (without rebooting):**
+
+      ```bash
+      /usr/bin/chromium-browser --kiosk --noerrdialogs --disable-infobars --autoplay-policy=no-user-gesture-required https://photoportal.alexhadik.com/device
+      ```
+
+   **Disabling Kiosk Mode:**
+
+   To disable kiosk mode, remove or rename the autostart file:
+
+   ```bash
+   rm ~/.config/autostart/photoportal-kiosk.desktop
+   ```
+
+   **Note:** Chromium must be installed for kiosk mode to work. On Raspberry Pi OS, Chromium is typically pre-installed. If it's not installed, you can install it with:
+
+   ```bash
+   sudo apt update
+   sudo apt install -y chromium-browser
+   ```
 
 ## Usage
 
@@ -156,7 +372,7 @@ venv/bin/python3 diagnostic.py
 
 - Monitors all GPIO inputs (buttons and switches) and logs state changes
 - Reads ADC potentiometer values and logs changes (when change > 2%)
-- Tests LED PWM output with fade effect (fades when Like button is pressed)
+- Tests LED PWM output with fade effect (fades when Select button is pressed)
 - Displays timestamps and detailed state information
 
 **Example output:**
@@ -172,11 +388,11 @@ LED (GPIO 17) initialized with PWM
 Initializing GPIO inputs...
 All inputs configured with pull-up resistors (active LOW)
 
-Like Button (GPIO 18) [button] -> RELEASED/OFF (initial state)
+Select Button (GPIO 18) [button] -> RELEASED/OFF (initial state)
 Map Toggle (GPIO 27) [switch] -> OFF (initial state)
 ...
 
-[2024-12-15 10:30:45.123] Like Button (GPIO 18) [button] -> PRESSED/ON
+[2024-12-15 10:30:45.123] Select Button (GPIO 18) [button] -> PRESSED/ON
 [2024-12-15 10:30:45.456] ADC (Potentiometer) -> 0.523 (raw: 17145)
 ```
 
@@ -227,87 +443,13 @@ The service logs to stdout/stderr. You should see:
 ```
 INFO - Photo Portal GPIO Service starting...
 INFO - LED (GPIO 17) initialized with PWM
-INFO - LIKE_BUTTON (GPIO 18) initialized
+INFO - SELECT_BUTTON (GPIO 18) initialized
 ...
 INFO - Starting WebSocket server on localhost:8765
 INFO - WebSocket server started
 ```
 
 **Exit:** Press `Ctrl+C` or send SIGTERM/SIGINT to stop the service.
-
-### Running as a System Service
-
-To run the GPIO service automatically on boot and keep it running:
-
-1. **Copy the systemd unit file:**
-
-   ```bash
-   sudo cp photoportal-gpio.service /etc/systemd/system/
-   ```
-
-2. **Edit the service file if needed:**
-
-   ```bash
-   sudo nano /etc/systemd/system/photoportal-gpio.service
-   ```
-
-   The default service file is configured to use the virtual environment at `/home/pi/photoportal/venv/bin/python3`.
-
-   Update the paths if your installation is in a different location:
-   ```
-   ExecStart=/home/pi/photoportal/venv/bin/python3 /home/pi/photoportal/gpio_service.py
-   WorkingDirectory=/home/pi/photoportal
-   ```
-
-   **If you're NOT using a virtual environment** (e.g., using `--user` install), update the service file:
-   ```
-   ExecStart=/usr/bin/python3 /home/pi/photoportal/gpio_service.py
-   Environment="PYTHONPATH=/home/pi/.local/lib/python3.11/site-packages"
-   ```
-
-3. **Reload systemd and enable the service:**
-
-   ```bash
-   sudo systemctl daemon-reload
-   sudo systemctl enable photoportal-gpio.service
-   ```
-
-4. **Start the service:**
-
-   ```bash
-   sudo systemctl start photoportal-gpio.service
-   ```
-
-5. **Check service status:**
-
-   ```bash
-   sudo systemctl status photoportal-gpio.service
-   ```
-
-6. **View service logs:**
-
-   ```bash
-   sudo journalctl -u photoportal-gpio.service -f
-   ```
-
-**Service management commands:**
-
-```bash
-# Start service
-sudo systemctl start photoportal-gpio.service
-
-# Stop service
-sudo systemctl stop photoportal-gpio.service
-
-# Restart service
-sudo systemctl restart photoportal-gpio.service
-
-# Disable auto-start on boot
-sudo systemctl disable photoportal-gpio.service
-
-# Check if service is running
-sudo systemctl is-active photoportal-gpio.service
-```
 
 ## Troubleshooting
 
@@ -489,13 +631,13 @@ If the webapp can't connect to the GPIO service:
 
    ```bash
    which python3
-   ls -l /home/pi/photoportal/gpio_service.py
+   ls -l /home/pi/photo-portal-device/gpio_service.py
    ```
 
 3. **Test script manually:**
 
    ```bash
-   python3 /home/pi/photoportal/gpio_service.py
+   python3 /home/pi/photo-portal-device/gpio_service.py
    ```
 
    This will show any import or runtime errors.
@@ -533,17 +675,16 @@ If scripts exit right after starting:
 ## Hardware Reference
 
 For detailed hardware wiring diagrams and pin assignments, see:
-- [Technical Architecture](../photo-portal-web/docs/technical_architecture.md)
+- [Hardware Wiring Guide](docs/hardware-wiring.md)
 
 **Quick Pin Reference:**
 
 | Component | GPIO Pin | Physical Pin | Description |
 |-----------|----------|--------------|-------------|
-| LED | 17 | 11 | Message indicator (PWM) |
-| Like Button | 18 | 12 | Momentary button |
+| LED Push Button (LED contacts) | 17 | 11 | Message indicator (PWM, built-in 200Ω resistor) |
+| LED Push Button (button contacts) | 18 | 12 | Select/Message button (shows message in Slideshow Mode, sets boundary filter in Map View) |
 | Map Toggle | 27 | 13 | SPDT switch |
 | Metadata Toggle | 22 | 15 | SPDT switch |
-| Message Button | 23 | 16 | Momentary button |
 | ADS1115 SDA | 2 | 3 | I2C data |
 | ADS1115 SCL | 3 | 5 | I2C clock |
 

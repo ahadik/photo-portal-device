@@ -14,7 +14,7 @@ import signal
 import sys
 import threading
 import time
-from typing import Dict, Optional, Set
+from typing import Any, Callable, Dict, Optional, Set, Union
 
 try:
     from gpiozero import DigitalInputDevice, PWMOutputDevice  # type: ignore
@@ -40,21 +40,20 @@ except ImportError:
     print("Install it with: pip3 install websockets")
     sys.exit(1)
 
-# GPIO Pin Assignments (from technical_architecture.md)
-GPIO_LED = 17
-GPIO_LIKE_BUTTON = 18
-GPIO_MAP_TOGGLE = 27
-GPIO_METADATA_TOGGLE = 22
-GPIO_MESSAGE_BUTTON = 23
+# Import GPIO configuration from shared config file
+from gpio_config import (
+    GPIO_LED,
+    GPIO_SELECT_BUTTON,
+    GPIO_MAP_TOGGLE,
+    GPIO_METADATA_TOGGLE,
+    ADC_I2C_ADDRESS,
+    ADC_POLL_RATE,
+    ADC_CHANGE_THRESHOLD
+)
 
 # WebSocket configuration
 WS_HOST = "localhost"
 WS_PORT = 8765
-
-# ADC configuration
-ADC_I2C_ADDRESS = 0x48  # Default ADS1115 address
-ADC_POLL_RATE = 10  # Hz (10Hz = 100ms interval)
-ADC_CHANGE_THRESHOLD = 0.02  # 2% of full range
 # Note: ADC_CHANNEL will be set after imports are available
 
 # Configure logging
@@ -76,9 +75,13 @@ clients_lock: Optional[asyncio.Lock] = None  # Will be initialized in websocket_
 event_queue: Optional[asyncio.Queue] = None  # Queue for events from threads
 websocket_loop: Optional[asyncio.AbstractEventLoop] = None  # Store reference to event loop
 switch_states: Dict[str, str] = {}  # Track switch states for MAP_TOGGLE and METADATA_TOGGLE
+message_waiting: bool = False  # Track if there's a new message waiting (for button glowing state)
+fade_active = False  # Controls LED fade when message is waiting
+fade_lock = threading.Lock()  # Lock for fade_active access
+fade_thread: Optional[threading.Thread] = None  # LED fade thread
 
 
-def broadcast_event(event: dict) -> None:
+def broadcast_event(event: Dict[str, Any]) -> None:
     """Broadcast a GPIO event to all connected WebSocket clients (called from thread context)."""
     if not event_queue:
         logger.debug("Event queue not initialized, skipping broadcast")
@@ -94,11 +97,11 @@ def broadcast_event(event: dict) -> None:
     try:
         if websocket_loop and websocket_loop.is_running():
             asyncio.run_coroutine_threadsafe(event_queue.put(message), websocket_loop)
-            logger.debug(f"Queued event: {event.get('type')}")
+            logger.debug("Queued event: %s", event.get('type'))
         else:
             logger.warning("WebSocket loop not running, cannot queue event")
     except Exception as e:
-        logger.warning(f"Error queuing event: {e}", exc_info=True)
+        logger.warning("Error queuing event: %s", e, exc_info=True)
 
 
 async def broadcast_worker() -> None:
@@ -125,17 +128,17 @@ async def broadcast_worker() -> None:
                     except websockets.exceptions.ConnectionClosed:
                         disconnected.add(client)
                     except Exception as e:
-                        logger.warning(f"Error sending message to client: {e}")
+                        logger.warning("Error sending message to client: %s", e)
                         disconnected.add(client)
                 
                 # Remove disconnected clients
                 connected_clients -= disconnected
                 
         except Exception as e:
-            logger.error(f"Error in broadcast worker: {e}")
+            logger.error("Error in broadcast worker: %s", e)
 
 
-def create_gpio_event_handler(input_name: str, event_type: str) -> callable:
+def create_gpio_event_handler(input_name: str, event_type: str) -> Callable[[], None]:
     """Create an event handler for GPIO inputs that broadcasts WebSocket events."""
     def handler():
         if input_name == 'MAP_TOGGLE':
@@ -146,13 +149,13 @@ def create_gpio_event_handler(input_name: str, event_type: str) -> callable:
                 state = "OFF" if device.value else "ON"
                 switch_states[input_name] = state
                 event = {"type": event_type, "value": state}
-                logger.info(f"GPIO event: {input_name} -> {state}")
+                logger.info("GPIO event: %s -> %s", input_name, state)
                 broadcast_event(event)
         else:
             # For buttons and METADATA_TOGGLE, just send the event (no state value)
             # Note: METADATA_TOGGLE is a switch but sends toggle events without value
             event = {"type": event_type}
-            logger.info(f"GPIO event: {input_name} triggered")
+            logger.info("GPIO event: %s triggered", input_name)
             broadcast_event(event)
     
     return handler
@@ -164,27 +167,79 @@ def setup_led() -> bool:
     
     try:
         led_device = PWMOutputDevice(GPIO_LED, initial_value=0.0, frequency=1000)
-        logger.info(f"LED (GPIO {GPIO_LED}) initialized with PWM")
+        logger.info("LED (GPIO %d) initialized with PWM", GPIO_LED)
         return True
     except Exception as e:
         error_msg = str(e)
         if "busy" in error_msg.lower():
-            logger.error(f"Failed to initialize LED on GPIO {GPIO_LED}: {e}")
+            logger.error("Failed to initialize LED on GPIO %d: %s", GPIO_LED, e)
             logger.error("  GPIO pin is already in use. Another process may be using it.")
             logger.error("  Try: sudo lsof | grep gpio  or  sudo fuser /dev/gpiochip*")
             logger.error("  Or restart the service: sudo systemctl restart photoportal-gpio.service")
         else:
-            logger.error(f"Failed to initialize LED on GPIO {GPIO_LED}: {e}")
+            logger.error("Failed to initialize LED on GPIO %d: %s", GPIO_LED, e)
         return False
 
 
+def fade_led_loop() -> None:
+    """Fade LED in and out continuously while fade_active is True."""
+    
+    fade_duration = 2.0  # seconds for full fade in/out cycle
+    steps = 100  # number of steps in fade
+    step_delay = fade_duration / steps
+    
+    while True:
+        with fade_lock:
+            should_fade = fade_active
+        
+        if not should_fade:
+            # Turn off LED when not fading
+            if led_device:
+                try:
+                    led_device.value = 0
+                except Exception as e:
+                    logger.error("Error setting LED value in fade loop: %s", e)
+            time.sleep(0.1)
+            continue
+        
+        # Fade in
+        for i in range(steps + 1):
+            with fade_lock:
+                if not fade_active:
+                    break
+                if led_device:
+                    try:
+                        # PWM value from 0.0 to 1.0
+                        led_device.value = i / steps
+                    except Exception as e:
+                        logger.error("Error setting LED value in fade loop: %s", e)
+            time.sleep(step_delay)
+        
+        # Fade out
+        for i in range(steps, -1, -1):
+            with fade_lock:
+                if not fade_active:
+                    break
+                if led_device:
+                    try:
+                        led_device.value = i / steps
+                    except Exception as e:
+                        logger.error("Error setting LED value in fade loop: %s", e)
+            time.sleep(step_delay)
+
+
 def set_led_state(value: str) -> None:
-    """Set LED state (ON or OFF)."""
-    global led_device
+    """Set LED state (ON or OFF). Only works when not fading."""
     
     if not led_device:
         logger.warning("LED device not initialized")
         return
+    
+    # Don't override LED state if fading is active
+    with fade_lock:
+        if fade_active:
+            logger.debug("LED fade is active, ignoring manual LED state change")
+            return
     
     try:
         if value.upper() == "ON":
@@ -194,18 +249,27 @@ def set_led_state(value: str) -> None:
             led_device.value = 0.0
             logger.info("LED turned OFF")
         else:
-            logger.warning(f"Invalid LED value: {value}")
+            logger.warning("Invalid LED value: %s", value)
     except Exception as e:
-        logger.error(f"Error setting LED state: {e}")
+        logger.error("Error setting LED state: %s", e)
+
+
+def start_led_fade_thread() -> None:
+    """Start LED fade thread in background."""
+    global fade_thread
+    
+    fade_thread = threading.Thread(target=fade_led_loop, daemon=True)
+    fade_thread.start()
+    logger.info("LED fade thread started")
 
 
 def setup_gpio_inputs() -> None:
     """Initialize all GPIO inputs with pull-up resistors."""
     input_configs = {
-        'LIKE_BUTTON': {
-            'pin': GPIO_LIKE_BUTTON,
+        'SELECT_BUTTON': {
+            'pin': GPIO_SELECT_BUTTON,
             'type': 'button',
-            'event_type': 'LIKE_BUTTON'
+            'event_type': 'SELECT_BUTTON'
         },
         'MAP_TOGGLE': {
             'pin': GPIO_MAP_TOGGLE,
@@ -216,17 +280,12 @@ def setup_gpio_inputs() -> None:
             'pin': GPIO_METADATA_TOGGLE,
             'type': 'switch',
             'event_type': 'METADATA_TOGGLE'
-        },
-        'MESSAGE_BUTTON': {
-            'pin': GPIO_MESSAGE_BUTTON,
-            'type': 'button',
-            'event_type': 'MESSAGE_BUTTON'
         }
     }
     
     for name, config in input_configs.items():
         pin = config['pin']
-        event_type = config['event_type']
+        event_type: str = str(config['event_type'])
         
         try:
             # Create DigitalInputDevice with pull-up (pull_up=True)
@@ -246,27 +305,29 @@ def setup_gpio_inputs() -> None:
                 # Initialize switch state
                 state = "OFF" if device.value else "ON"
                 switch_states[name] = state
-                logger.info(f"{name} (GPIO {pin}) initial state: {state}")
+                logger.info("%s (GPIO %d) initial state: %s", name, pin, state)
             else:
-                logger.info(f"{name} (GPIO {pin}) initialized")
+                logger.info("%s (GPIO %d) initialized", name, pin)
             
         except Exception as e:
             error_msg = str(e)
             if "busy" in error_msg.lower():
-                logger.error(f"Failed to initialize {name} on GPIO {pin}: {e}")
-                if name == 'LIKE_BUTTON':  # Only print help message once
+                logger.error("Failed to initialize %s on GPIO %d: %s", name, pin, e)
+                # Print help message only for the first error
+                if name == list(input_configs.keys())[0]:
                     logger.error("  GPIO pins are already in use. Another process may be using them.")
                     logger.error("  Try: sudo lsof | grep gpio  or  sudo fuser /dev/gpiochip*")
                     logger.error("  Or restart the service: sudo systemctl restart photoportal-gpio.service")
                     logger.error("  Or stop any other GPIO services/scripts that might be running.")
             elif "SOC peripheral base address" in error_msg or "lgpio" in error_msg.lower():
-                logger.error(f"Failed to initialize {name} on GPIO {pin}: {e}")
-                if name == 'LIKE_BUTTON':  # Only print help message once
+                logger.error("Failed to initialize %s on GPIO %d: %s", name, pin, e)
+                # Print help message only for the first error
+                if name == list(input_configs.keys())[0]:
                     logger.error("  This usually means you're not running on a Raspberry Pi, or GPIO libraries aren't configured.")
                     logger.error("  This script must be run on a Raspberry Pi with proper GPIO access.")
                     logger.error("  If you are on a Raspberry Pi, try: sudo apt install python3-lgpio")
             else:
-                logger.error(f"Failed to initialize {name} on GPIO {pin}: {e}")
+                logger.error("Failed to initialize %s on GPIO %d: %s", name, pin, e)
             input_devices[name] = None
 
 
@@ -291,7 +352,7 @@ def adc_reader_loop() -> None:
         initial_normalized = initial_raw / 32767.0
         with adc_lock:
             last_adc_value = initial_normalized
-        logger.info(f"ADC initial value: {initial_normalized:.3f} (raw: {initial_raw})")
+        logger.info("ADC initial value: %.3f (raw: %d)", initial_normalized, initial_raw)
         
         poll_interval = 1.0 / ADC_POLL_RATE  # 100ms for 10Hz
         
@@ -313,17 +374,17 @@ def adc_reader_loop() -> None:
                         
                         # Broadcast ZOOM_DIAL event
                         event = {"type": "ZOOM_DIAL", "value": normalized_value}
-                        logger.info(f"ADC change detected: {normalized_value:.3f} (change: {change:.3f}, raw: {raw_value})")
+                        logger.info("ADC change detected: %.3f (change: %.3f, raw: %d)", normalized_value, change, raw_value)
                         broadcast_event(event)
                 
                 time.sleep(poll_interval)
                 
             except Exception as e:
-                logger.error(f"Error reading ADC: {e}", exc_info=True)
+                logger.error("Error reading ADC: %s", e, exc_info=True)
                 time.sleep(poll_interval)
                 
     except Exception as e:
-        logger.error(f"Failed to initialize ADC: {e}", exc_info=True)
+        logger.error("Failed to initialize ADC: %s", e, exc_info=True)
         adc_running = False
 
 
@@ -347,30 +408,34 @@ async def send_initial_states(websocket) -> None:
         state = switch_states['MAP_TOGGLE']
         event = {"type": "MAP_TOGGLE", "value": state}
         await websocket.send(json.dumps(event))
-        logger.debug(f"Sent initial MAP_TOGGLE state: {state}")
+        logger.debug("Sent initial MAP_TOGGLE state: %s", state)
     
     # Send ADC initial value if ADC is available
     # Note: last_adc_value starts at 0.0, which is a valid initial state
     if ADC_AVAILABLE:
         with adc_lock:
-            event = {"type": "ZOOM_DIAL", "value": last_adc_value}
-            await websocket.send(json.dumps(event))
-            logger.debug(f"Sent initial ZOOM_DIAL value: {last_adc_value:.3f}")
+            zoom_event: Dict[str, Union[str, float]] = {"type": "ZOOM_DIAL", "value": last_adc_value}
+            await websocket.send(json.dumps(zoom_event))
+            logger.debug("Sent initial ZOOM_DIAL value: %.3f", last_adc_value)
 
 
 async def handle_client(websocket) -> None:
     """Handle a WebSocket client connection."""
-    global connected_clients
+    global connected_clients, message_waiting, fade_active
+    
+    if not clients_lock:
+        logger.error("clients_lock not initialized")
+        return
     
     async with clients_lock:
         connected_clients.add(websocket)
-    logger.info(f"Client connected (total clients: {len(connected_clients)})")
+    logger.info("Client connected (total clients: %d)", len(connected_clients))
     
     # Send initial states to the newly connected client
     try:
         await send_initial_states(websocket)
     except Exception as e:
-        logger.warning(f"Error sending initial states to client: {e}")
+        logger.warning("Error sending initial states to client: %s", e)
     
     try:
         async for message in websocket:
@@ -384,23 +449,37 @@ async def handle_client(websocket) -> None:
                         # Set LED state (runs in thread-safe context)
                         set_led_state(value)
                     else:
-                        logger.warning(f"Invalid LED value: {value}")
+                        logger.warning("Invalid LED value: %s", value)
+                # Handle MESSAGE_WAITING event
+                elif data.get("type") == "MESSAGE_WAITING":
+                    value = data.get("value")
+                    message_waiting = bool(value) if value is not None else True
+                    with fade_lock:
+                        fade_active = message_waiting
+                    logger.info("Message waiting state updated: %s, fade_active: %s", message_waiting, fade_active)
+                # Handle MESSAGE_READ event
+                elif data.get("type") == "MESSAGE_READ":
+                    message_waiting = False
+                    with fade_lock:
+                        fade_active = False
+                    logger.info("Message read - clearing waiting state and stopping fade")
                 else:
-                    logger.warning(f"Unknown command type: {data.get('type')}")
+                    logger.warning("Unknown command type: %s", data.get('type'))
                     
             except json.JSONDecodeError:
-                logger.warning(f"Invalid JSON received: {message}")
+                logger.warning("Invalid JSON received: %s", message)
             except Exception as e:
-                logger.error(f"Error handling client message: {e}")
+                logger.error("Error handling client message: %s", e)
                 
     except websockets.exceptions.ConnectionClosed:
         logger.info("Client disconnected")
     except Exception as e:
-        logger.error(f"Error in client handler: {e}")
+        logger.error("Error in client handler: %s", e)
     finally:
-        async with clients_lock:
-            connected_clients.discard(websocket)
-        logger.info(f"Client removed (remaining clients: {len(connected_clients)})")
+        if clients_lock:
+            async with clients_lock:
+                connected_clients.discard(websocket)
+            logger.info("Client removed (remaining clients: %d)", len(connected_clients))
 
 
 async def websocket_server() -> None:
@@ -414,7 +493,7 @@ async def websocket_server() -> None:
     # Start broadcast worker
     asyncio.create_task(broadcast_worker())
     
-    logger.info(f"Starting WebSocket server on {WS_HOST}:{WS_PORT}")
+    logger.info("Starting WebSocket server on %s:%d", WS_HOST, WS_PORT)
     
     async with websockets.serve(handle_client, WS_HOST, WS_PORT):
         logger.info("WebSocket server started")
@@ -424,9 +503,13 @@ async def websocket_server() -> None:
 
 def cleanup() -> None:
     """Clean up GPIO resources."""
-    global adc_running, led_device
+    global adc_running, fade_active
     
     logger.info("Cleaning up resources...")
+    
+    # Stop LED fade
+    with fade_lock:
+        fade_active = False
     
     # Stop ADC reader
     adc_running = False
@@ -440,21 +523,21 @@ def cleanup() -> None:
             led_device.close()
             logger.info("LED closed")
         except Exception as e:
-            logger.error(f"Error closing LED: {e}")
+            logger.error("Error closing LED: %s", e)
     
     # Close all GPIO inputs
     for name, device in input_devices.items():
         if device:
             try:
                 device.close()
-                logger.info(f"{name} closed")
+                logger.info("%s closed", name)
             except Exception as e:
-                logger.error(f"Error closing {name}: {e}")
+                logger.error("Error closing %s: %s", name, e)
 
 
-def signal_handler(signum, frame) -> None:
+def signal_handler(signum, _frame) -> None:
     """Handle shutdown signals."""
-    logger.info(f"Received signal {signum}, shutting down...")
+    logger.info("Received signal %d, shutting down...", signum)
     cleanup()
     sys.exit(0)
 
@@ -472,6 +555,7 @@ def main() -> None:
         setup_led()
         setup_gpio_inputs()
         start_adc_reader()
+        start_led_fade_thread()
         
         # Run WebSocket server (blocks forever)
         asyncio.run(websocket_server())
@@ -479,7 +563,7 @@ def main() -> None:
     except KeyboardInterrupt:
         logger.info("Keyboard interrupt received")
     except Exception as e:
-        logger.error(f"Fatal error: {e}", exc_info=True)
+        logger.error("Fatal error: %s", e, exc_info=True)
     finally:
         cleanup()
 

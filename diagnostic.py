@@ -6,11 +6,11 @@ This script monitors all GPIO inputs on the Raspberry Pi and logs their state
 changes to the console. Use this to verify physical switches and buttons are
 wired correctly.
 
-Based on GPIO pin assignments from technical_architecture.md:
-- GPIO 18: Like button (momentary, pull-up)
+Based on GPIO pin assignments from hardware-wiring.md:
+- GPIO 17: LED (PWM output)
+- GPIO 18: Select/Message button (momentary, pull-up) - button contacts of LED push button
 - GPIO 27: Map view toggle (SPDT, pull-up)
 - GPIO 22: Metadata overlay toggle (SPDT, pull-up)
-- GPIO 23: Message view button (momentary, pull-up)
 - ADS1115 (I2C): Potentiometer (zoom control)
 """
 
@@ -39,22 +39,21 @@ except ImportError:
     ADC_AVAILABLE = False
     print("WARNING: adafruit-circuitpython-ads1x15 not available. ADC functionality disabled.")
 
-# GPIO Pin Assignments (from technical_architecture.md)
-GPIO_LED = 17
-GPIO_LIKE_BUTTON = 18
-GPIO_MAP_TOGGLE = 27
-GPIO_METADATA_TOGGLE = 22
-GPIO_MESSAGE_BUTTON = 23
+# Import GPIO configuration from shared config file
+from gpio_config import (
+    GPIO_LED,
+    GPIO_SELECT_BUTTON,
+    GPIO_MAP_TOGGLE,
+    GPIO_METADATA_TOGGLE,
+    ADC_I2C_ADDRESS,
+    ADC_POLL_RATE,
+    ADC_CHANGE_THRESHOLD
+)
 
 # LED fade control
 led_device = None
 fade_active = False
 fade_lock = threading.Lock()
-
-# ADC configuration
-ADC_I2C_ADDRESS = 0x48  # Default ADS1115 address
-ADC_POLL_RATE = 10  # Hz (10Hz = 100ms interval)
-ADC_CHANGE_THRESHOLD = 0.02  # 2% of full range
 
 # ADC state
 adc_reader_thread = None
@@ -64,8 +63,8 @@ last_adc_value = 0.0
 
 # Input configurations
 INPUTS = {
-    'Like Button': {
-        'pin': GPIO_LIKE_BUTTON,
+    'Select Button': {
+        'pin': GPIO_SELECT_BUTTON,
         'type': 'momentary',
         'device': None
     },
@@ -77,11 +76,6 @@ INPUTS = {
     'Metadata Toggle': {
         'pin': GPIO_METADATA_TOGGLE,
         'type': 'switch',
-        'device': None
-    },
-    'Message Button': {
-        'pin': GPIO_MESSAGE_BUTTON,
-        'type': 'momentary',
         'device': None
     }
 }
@@ -159,8 +153,8 @@ def create_activated_handler(name, pin, input_type):
         global fade_active
         log_state_change(name, pin, True, input_type)  # True = pressed/on
         
-        # Start LED fade when Like button is pressed
-        if name == 'Like Button':
+        # Start LED fade when Select button is pressed
+        if name == 'Select Button':
             with fade_lock:
                 fade_active = True
             print(f"[{format_timestamp()}] LED fade started")
@@ -174,8 +168,8 @@ def create_deactivated_handler(name, pin, input_type):
         global fade_active
         log_state_change(name, pin, False, input_type)  # False = released/off
         
-        # Stop LED fade when Like button is released
-        if name == 'Like Button':
+        # Stop LED fade when Select button is released
+        if name == 'Select Button':
             with fade_lock:
                 fade_active = False
             print(f"[{format_timestamp()}] LED fade stopped")
@@ -309,7 +303,7 @@ def setup_inputs():
             if "SOC peripheral base address" in error_msg or "lgpio" in error_msg.lower():
                 print(f"ERROR: Failed to initialize {name} on GPIO {pin}: {e}")
                 print(f"  This usually means you're not running on a Raspberry Pi, or GPIO libraries aren't configured.")
-                if name == 'Like Button':  # Only print help message once
+                if name == 'Select Button':  # Only print help message once
                     print("  This script must be run on a Raspberry Pi with proper GPIO access.")
                     print("  If you are on a Raspberry Pi, try: sudo apt install python3-lgpio")
             else:
