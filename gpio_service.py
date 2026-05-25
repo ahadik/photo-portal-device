@@ -141,8 +141,8 @@ async def broadcast_worker() -> None:
 def create_gpio_event_handler(input_name: str, event_type: str) -> Callable[[], None]:
     """Create an event handler for GPIO inputs that broadcasts WebSocket events."""
     def handler():
-        if input_name == 'MAP_TOGGLE':
-            # For MAP_TOGGLE switch, track state and send ON/OFF
+        if input_name in ('MAP_TOGGLE', 'METADATA_TOGGLE'):
+            # Switches: track position and send ON/OFF so the webapp can mirror state directly
             device = input_devices.get(input_name)
             if device:
                 # device.value is False when active, True when inactive
@@ -152,8 +152,6 @@ def create_gpio_event_handler(input_name: str, event_type: str) -> Callable[[], 
                 logger.info("GPIO event: %s -> %s", input_name, state)
                 broadcast_event(event)
         else:
-            # For buttons and METADATA_TOGGLE, just send the event (no state value)
-            # Note: METADATA_TOGGLE is a switch but sends toggle events without value
             event = {"type": event_type}
             logger.info("GPIO event: %s triggered", input_name)
             broadcast_event(event)
@@ -298,10 +296,10 @@ def setup_gpio_inputs() -> None:
             # when_deactivated fires when pin becomes True (released/off)
             device.when_activated = create_gpio_event_handler(name, event_type)
             
-            # For MAP_TOGGLE switch, also handle deactivation to track state changes
-            if name == 'MAP_TOGGLE':
+            # For switches, also handle deactivation so both positions emit an event
+            if name in ('MAP_TOGGLE', 'METADATA_TOGGLE'):
                 device.when_deactivated = create_gpio_event_handler(name, event_type)
-                
+
                 # Initialize switch state
                 state = "OFF" if device.value else "ON"
                 switch_states[name] = state
@@ -403,12 +401,13 @@ def start_adc_reader() -> None:
 
 async def send_initial_states(websocket) -> None:
     """Send initial states of all inputs to a newly connected client."""
-    # Send MAP_TOGGLE initial state
-    if 'MAP_TOGGLE' in switch_states:
-        state = switch_states['MAP_TOGGLE']
-        event = {"type": "MAP_TOGGLE", "value": state}
-        await websocket.send(json.dumps(event))
-        logger.debug("Sent initial MAP_TOGGLE state: %s", state)
+    # Send switch initial states
+    for switch_name in ('MAP_TOGGLE', 'METADATA_TOGGLE'):
+        if switch_name in switch_states:
+            state = switch_states[switch_name]
+            event = {"type": switch_name, "value": state}
+            await websocket.send(json.dumps(event))
+            logger.debug("Sent initial %s state: %s", switch_name, state)
     
     # Send ADC initial value if ADC is available
     # Note: last_adc_value starts at 0.0, which is a valid initial state

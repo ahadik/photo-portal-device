@@ -29,18 +29,31 @@ This document describes the physical hardware components required for the Photo 
 - Standard 5mm LED (any color)
 - 330Ω Resistor - For LED current limiting (required for separate LED)
 
-## GPIO Pin Assignments
+## Raspberry Pi Pin Connections
 
-| Component | GPIO Pin | Physical Pin | Description |
-|-----------|----------|--------------|-------------|
-| LED Push Button (LED contacts) | 17 | 11 | Message indicator (PWM output, built-in 200Ω resistor) |
-| LED Push Button (button contacts) | 18 | 12 | Select/Message button (input) |
-| Map Toggle | 27 | 13 | SPDT switch (input) |
-| Metadata Toggle | 22 | 15 | SPDT switch (input) |
-| ADS1115 SDA | 2 | 3 | I2C data line |
-| ADS1115 SCL | 3 | 5 | I2C clock line |
+Every wire that lands on the Pi header — power, ground, and GPIO.
 
-**Note:** Physical pin numbers refer to the Raspberry Pi GPIO header pinout. GPIO pins use BCM numbering.
+| Component Pin | Pi GPIO (BCM) | Pi Physical Pin | Description |
+|---------------|---------------|-----------------|-------------|
+| ADS1115 — VIN (a.k.a. VDD) | — | 1 or 17 (3.3V) | Power for ADC |
+| ADS1115 — SDA | 2 | 3 | I2C data line |
+| ADS1115 — SCL | 3 | 5 | I2C clock line |
+| LED Push Button — LED+ | 17 | 11 | Message indicator (PWM output, built-in 200Ω resistor) |
+| LED Push Button — switch terminal 1 | 18 | 12 | Select/Message button (input, internal pull-up) |
+| Map Toggle — common | 27 | 13 | SPDT switch (input, internal pull-up) |
+| Metadata Toggle — common | 22 | 15 | SPDT switch (input, internal pull-up) |
+| Potentiometer — outer terminal 1 | — | 1 or 17 (3.3V) | Pot reference voltage |
+| Potentiometer — outer terminal 2 | — | any GND | Pot ground |
+| LED Push Button — LED− | — | any GND (e.g., 6, 9, 14, 20, 25, 30, 34, 39) | LED return |
+| ADS1115 — ADDR | — | any GND | Ties I2C address to default `0x48` |
+| ADS1115 — GND | — | any GND | Ground for ADC |
+| Metadata Toggle — outer terminal | — | any GND | Switch return |
+| Map Toggle — outer terminal | — | any GND | Switch return |
+| LED Push Button — switch terminal 2 | — | any GND | Button return |
+
+**Note:** Physical pin numbers refer to the Raspberry Pi GPIO header pinout. GPIO pins use BCM numbering. The potentiometer's wiper does not connect to the Pi — it connects to **A0** on the ADS1115 (see the [ADS1115 section](#ads1115-adc-module-for-potentiometer) below).
+
+![Pin Out for Raspberry Pi](../pi-5-diagram.jpg)
 
 ## Wiring Instructions
 
@@ -150,13 +163,24 @@ GPIO 22 (Pin 15) → [Switch Common Terminal]
 
 The ADS1115 is a 16-bit analog-to-digital converter that allows reading analog values from a potentiometer for zoom control.
 
-**Wiring:**
-1. **VDD** (power) → **3.3V** (physical pin 1 or 17)
-2. **GND** → **GND** (any ground pin)
-3. **SDA** (data) → **GPIO 2** (physical pin 3) - This is the I2C data line
-4. **SCL** (clock) → **GPIO 3** (physical pin 5) - This is the I2C clock line
+**ADS1115 Pin Reference:**
 
-**Potentiometer Wiring (if using):**
+| ADS1115 Pin | Connects To | Purpose |
+|-------------|-------------|---------|
+| VIN (a.k.a. VDD) | Pi 3.3V (physical pin 1 or 17) | Power |
+| GND | Pi GND (any ground pin) | Ground |
+| SCL | Pi GPIO 3 (physical pin 5) | I2C clock |
+| SDA | Pi GPIO 2 (physical pin 3) | I2C data |
+| ADDR | GND | I2C address select — tie to GND for default `0x48` |
+| A0 | Potentiometer wiper | Analog input for zoom potentiometer |
+| ALRT | (unconnected) | Alert/ready output — unused |
+| A1, A2, A3 | (unconnected) | Spare analog inputs — unused |
+
+**Note on VIN vs VDD:** Adafruit's ADS1115 breakout labels the power pin `VDD`; the STEMMA QT version and most generic breakouts label the same pin `VIN`. Either way, connect it to 3.3V.
+
+**Note on ADDR:** The ADS1115's I2C address depends on what ADDR is tied to: GND = `0x48` (default, what this project uses), VDD = `0x49`, SDA = `0x4A`, SCL = `0x4B`. Tie ADDR to GND.
+
+**Potentiometer Wiring:**
 1. Connect one outer terminal of the potentiometer to **3.3V**
 2. Connect the other outer terminal to **GND**
 3. Connect the **wiper** (center terminal) to **A0** on the ADS1115
@@ -164,8 +188,9 @@ The ADS1115 is a 16-bit analog-to-digital converter that allows reading analog v
 **Circuit Diagram:**
 ```
 Raspberry Pi:
-  3.3V (Pin 1) → ADS1115 VDD
-  GND (Pin 6)  → ADS1115 GND
+  3.3V (Pin 1)   → ADS1115 VIN
+  GND (Pin 6)    → ADS1115 GND
+  GND            → ADS1115 ADDR  (sets I2C address to 0x48)
   GPIO 2 (Pin 3) → ADS1115 SDA
   GPIO 3 (Pin 5) → ADS1115 SCL
 
@@ -177,7 +202,7 @@ Potentiometer:
 
 **Notes:**
 - I2C must be enabled on the Raspberry Pi (use `raspi-config`)
-- Default I2C address for ADS1115 is `0x48`
+- Default I2C address for ADS1115 is `0x48` (with ADDR tied to GND)
 - The ADC reads values from 0.0 to 1.0 (normalized)
 - The potentiometer provides zoom control for the photo display
 
@@ -196,14 +221,15 @@ Potentiometer:
                     └─────────────────────┘
 
 Connections:
-  Pin 1  (3.3V)  → ADS1115 VDD
+  Pin 1  (3.3V)  → ADS1115 VIN (a.k.a. VDD)
   Pin 3  (GPIO 2/SDA) → ADS1115 SDA
   Pin 5  (GPIO 3/SCL) → ADS1115 SCL
-  Pin 6  (GND)   → Common ground for all components
+  Pin 6  (GND)   → Common ground for all components (also ADS1115 GND and ADDR)
   Pin 11 (GPIO 17) → LED Push Button LED+ → [Built-in 200Ω] → LED Push Button LED- → GND
   Pin 12 (GPIO 18) → LED Push Button Switch Terminal 1 → LED Push Button Switch Terminal 2 → GND
   Pin 13 (GPIO 27) → Map Toggle (common) → (terminal 1 → GND)
   Pin 15 (GPIO 22) → Metadata Toggle (common) → (terminal 1 → GND)
+  ADS1115 A0     → Potentiometer wiper (outer terminals to 3.3V and GND)
 ```
 
 ## Power Considerations
@@ -252,8 +278,9 @@ The diagnostic script will:
 ### ADC Not Detected
 - Verify I2C is enabled: `sudo raspi-config` → Interface Options → I2C
 - Check I2C device detection: `sudo i2cdetect -y 1` (should show `0x48`)
-- Verify wiring: SDA to GPIO 2, SCL to GPIO 3, VDD to 3.3V, GND to GND
-- Ensure ADS1115 is powered (check VDD connection)
+- Verify wiring: SDA to GPIO 2, SCL to GPIO 3, VIN/VDD to 3.3V, GND to GND, ADDR to GND
+- If `i2cdetect` shows the ADS1115 at `0x49`, `0x4A`, or `0x4B` instead of `0x48`, the ADDR pin is tied to the wrong reference — move it to GND
+- Ensure ADS1115 is powered (check VIN/VDD connection)
 
 ### GPIO Permission Errors
 - Add user to gpio group: `sudo usermod -a -G gpio $USER`

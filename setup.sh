@@ -154,15 +154,23 @@ if [[ "$SETUP_SERVICE" =~ ^[Yy]$ ]]; then
     echo "Generating systemd service file..."
     SERVICE_FILE="/tmp/$SERVICE_NAME"
     
-    # Generate systemd service file
+    # Make sure the update script is executable so ExecStartPre can run it
+    chmod +x "$INSTALL_DIR/update.sh" 2>/dev/null || true
+
+    # Generate systemd service file.
+    # ExecStartPre runs update.sh to pull the latest changes from the tracked
+    # remote branch before launching the service. It is best-effort and never
+    # blocks startup (the script always exits 0).
     if [ -n "$PYTHON_ENV" ]; then
         cat > "$SERVICE_FILE" << EOF
 [Unit]
 Description=Photo Portal GPIO Service
-After=network.target
+Wants=network-online.target
+After=network-online.target
 
 [Service]
 Type=simple
+ExecStartPre=/bin/bash $INSTALL_DIR/update.sh
 ExecStart=$PYTHON_PATH $INSTALL_DIR/gpio_service.py
 Restart=always
 RestartSec=10
@@ -179,10 +187,12 @@ EOF
         cat > "$SERVICE_FILE" << EOF
 [Unit]
 Description=Photo Portal GPIO Service
-After=network.target
+Wants=network-online.target
+After=network-online.target
 
 [Service]
 Type=simple
+ExecStartPre=/bin/bash $INSTALL_DIR/update.sh
 ExecStart=$PYTHON_PATH $INSTALL_DIR/gpio_service.py
 Restart=always
 RestartSec=10

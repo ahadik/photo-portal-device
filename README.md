@@ -110,6 +110,8 @@ This directory contains Python scripts for managing GPIO hardware on the Raspber
 
 4. **Enable I2C (for ADC support):**
 
+   I2C (Inter-Integrated Circuit) is a serial communication protocol that allows the Raspberry Pi to talk to external chips over just two wires (SDA for data and SCL for clock). The Photo Portal uses I2C to communicate with the ADS1115 analog-to-digital converter, which reads the potentiometer's voltage and converts it into a digital value the software can use for zoom control. I2C is disabled by default on Raspberry Pi OS and must be enabled before the ADC will work.
+
    ```bash
    sudo raspi-config
    # Navigate to: Interface Options → I2C → Enable
@@ -687,6 +689,17 @@ For detailed hardware wiring diagrams and pin assignments, see:
 | Metadata Toggle | 22 | 15 | SPDT switch |
 | ADS1115 SDA | 2 | 3 | I2C data |
 | ADS1115 SCL | 3 | 5 | I2C clock |
+| ADS1115 VIN (a.k.a. VDD) | — | 1 (3.3V) | Power for ADC |
+| ADS1115 GND | — | 6 (GND) | Ground for ADC |
+| ADS1115 ADDR | — | GND | Ties I2C address to default `0x48` |
+| ADS1115 A0 | — | Pot wiper | Analog input — reads potentiometer wiper voltage |
+| Potentiometer Vin | — | 1 (3.3V) | One outer terminal to 3.3V |
+| Potentiometer GND | — | 6 (GND) | Other outer terminal to GND |
+| Potentiometer Wiper | — | ADS1115 A0 | Center terminal to ADC input A0 |
+
+**Note:** The ADS1115 also has an `ALRT` (alert/ready) pin that is unused in this project — leave it disconnected. Pins `A1`–`A3` are spare analog inputs and can also be left unconnected.
+
+![Pin Out for Raspberry Pi](pi-5-diagram.jpg)
 
 ## Development
 
