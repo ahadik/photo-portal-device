@@ -301,7 +301,7 @@ def setup_gpio_inputs() -> None:
                 device.when_deactivated = create_gpio_event_handler(name, event_type)
 
                 # Initialize switch state
-                state = "ON" if device.value else "OFF"
+                state = "OFF" if device.value else "ON"
                 switch_states[name] = state
                 logger.info("%s (GPIO %d) initial state: %s", name, pin, state)
             else:
